@@ -1,10 +1,12 @@
-package com.dimaoq.fdf.check;
+package com.check;
+
+import com.Test;
 
 public class Check {		
-		int checkTesting() {
+		static int checkTesting() {
 			int j = 0, k = 0;
 			for (int i = 0; i < 6; ++i) {
-				hello(i);
+				j = Test.hello(i);
 			}
 			
 			for (int i = 0; ; ++i) {
@@ -14,7 +16,7 @@ public class Check {
 			}
 			
 			for (int i = 0; i < 6 && 2 * j - 15 < 16 / x; ++k) {
-				hello(i);
+				k = Test.hello(i);
 			}
 			
 			for (int i = 0; i < 20; ++i) {
