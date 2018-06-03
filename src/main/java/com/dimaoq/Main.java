@@ -3,17 +3,21 @@ package com.dimaoq;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import com.github.javaparser.symbolsolver.javaparsermodel.JavaParserFacade;
 import com.github.javaparser.symbolsolver.model.resolution.TypeSolver;
+import com.github.javaparser.utils.CollectionContext;
+import com.github.javaparser.utils.Pair;
+import com.github.javaparser.utils.ProjectRoot;
 import com.github.javaparser.utils.SourceRoot;
 
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 // V519
@@ -25,6 +29,10 @@ public class Main {
 
     private static void write(String s) {
         System.out.println(s);
+    }
+
+    private static void writeErr(String s) {
+        System.err.println(s);
     }
 
     public static void main(String[] args) throws IOException {
@@ -58,6 +66,14 @@ public class Main {
         arg.facade = facade;
         arg.set = null;
 
+        HashMap<Integer, Visitor.DeclarationInfo> decl = new HashMap<>();
+        HashMap<Integer, ResolvedMethodDeclaration> used = new HashMap<>();
+
+        Visitor.UnusedMethodsArg unused = new Visitor.UnusedMethodsArg();
+        unused.facade = facade;
+        unused.usedCalls = used;
+        unused.declarations = decl;
+
         ParserConfiguration configuration = new ParserConfiguration().setSymbolResolver(new JavaSymbolSolver(solver));
         SourceRoot root = new SourceRoot(new File(args[0]).toPath(), configuration);
         List<ParseResult<CompilationUnit>> results = root.tryToParse();
@@ -67,8 +83,20 @@ public class Main {
                 CompilationUnit unit = res.getResult().get();
 //                write("Parsing: " + unit.getStorage().get().getPath().toString());
                 arg.unit = unit;
-                unit.accept(new Visitor.ForCheckVisitor(), arg);
+                unused.unit = unit;
+                //unit.accept(new Visitor.ForCheckVisitor(), arg);
+
+                unit.accept(new Visitor.UnusedMethodsFinder(), unused);
+
 //                write("Parsed success: " + unit.getStorage().get().getPath().toString());
+            }
+        }
+
+        for (Visitor.DeclarationInfo info : decl.values()) {
+            ResolvedMethodDeclaration declaration = info.decl;
+            if (!used.containsKey(Visitor.getHashForDeclaration(declaration))) {
+                write(String.format("%s, line %d: unused function %s %s", info.file, info.line,
+                        declaration.getReturnType().describe(), declaration.getName()));
             }
         }
     }

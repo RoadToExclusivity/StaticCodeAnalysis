@@ -1,12 +1,12 @@
 package com.dimaoq;
 
 import com.github.javaparser.Position;
+import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.*;
 import com.github.javaparser.ast.stmt.ForStmt;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
-import com.github.javaparser.resolution.declarations.ResolvedFieldDeclaration;
 import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
 import com.github.javaparser.resolution.types.ResolvedType;
 import com.github.javaparser.symbolsolver.javaparsermodel.JavaParserFacade;
@@ -15,36 +15,16 @@ import com.github.javaparser.symbolsolver.model.resolution.TypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
+import com.github.javaparser.utils.Pair;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Optional;
 
 public class Visitor {
     private CombinedTypeSolver typeSolver;
-
-    public static class GetMethodsVisitor extends VoidVisitorAdapter<JavaParserFacade> {
-        @Override
-        public void visit(MethodDeclaration n, JavaParserFacade facade) {
-            super.visit(n, facade);
-            ResolvedMethodDeclaration decl =  n.resolve();
-            System.out.println(String.format("Ret type = %s, name = %s, argCount = %d",
-                    decl.getReturnType().describe(), decl.getQualifiedName(), decl.getNumberOfParams()));
-        }
-    }
-
-    public static class CallVisitor extends VoidVisitorAdapter<JavaParserFacade>{
-        @Override
-        public void visit(MethodCallExpr n, JavaParserFacade facade) {
-
-            super.visit(n, facade);
-            SymbolReference<ResolvedMethodDeclaration> fsolve = facade.solve(n);
-            if (fsolve.isSolved()) {
-                System.out.println(String.format("Call of method %s", fsolve.getCorrespondingDeclaration().getQualifiedName()));
-            }
-        }
-    }
 
     private static class VisitExpr extends VoidVisitorAdapter<VisitorArg> {
         private void checkExpr(Expression e, VisitorArg arg) {
@@ -184,6 +164,63 @@ public class Visitor {
             }
 
             super.visit(n, arg);
+        }
+    }
+
+    public static class DeclarationInfo {
+        String file;
+        Integer line;
+        ResolvedMethodDeclaration decl;
+    }
+
+    public static class UnusedMethodsArg {
+        JavaParserFacade facade;
+        CompilationUnit unit;
+        HashMap<Integer, DeclarationInfo> declarations;
+        HashMap<Integer, ResolvedMethodDeclaration> usedCalls;
+    }
+
+    public static int getHashForDeclaration(ResolvedMethodDeclaration decl) {
+        String res = decl.getReturnType().describe();
+        res += decl.getQualifiedName();
+        res += Integer.toString(decl.getNumberOfParams());
+        for (int i = 0; i < decl.getNumberOfParams(); ++i) {
+            res += decl.getParam(i).describeType();
+        }
+
+        return res.hashCode();
+    }
+
+    public static class UnusedMethodsFinder extends VoidVisitorAdapter<UnusedMethodsArg> {
+        @Override
+        public void visit(MethodDeclaration n, UnusedMethodsArg arg) {
+            super.visit(n, arg);
+            ResolvedMethodDeclaration decl =  n.resolve();
+            DeclarationInfo info = new DeclarationInfo();
+            info.decl = decl;
+            info.line = n.getBegin().get().line;
+            info.file = arg.unit.getStorage().get().getFileName();
+            arg.declarations.put(getHashForDeclaration(decl), info);
+//            System.out.println(String.format("Ret type = %s, name = %s, argCount = %d",
+//                    decl.getReturnType().describe(), decl.getQualifiedName(), decl.getNumberOfParams()));
+        }
+
+        @Override
+        public void visit(MethodCallExpr n, UnusedMethodsArg arg) {
+            super.visit(n, arg);
+            try {
+                SymbolReference<ResolvedMethodDeclaration> fsolve = arg.facade.solve(n);
+                if (fsolve.isSolved()) {
+//                System.out.println(String.format("Call of method %s", fsolve.getCorrespondingDeclaration().getQualifiedName()));
+                    ResolvedMethodDeclaration decl = fsolve.getCorrespondingDeclaration();
+                    arg.usedCalls.put(getHashForDeclaration(decl), decl);
+                } else {
+                    System.err.println(String.format("Line %d: unresolved method usage: %s", n.getBegin().get().line, n.getNameAsString()));
+                }
+            } catch (Exception e) {
+                System.err.println(String.format("Line %d: unsolved symbol while parsing %s", n.getBegin().get().line, n.getNameAsString()));
+            }
+
         }
     }
 
