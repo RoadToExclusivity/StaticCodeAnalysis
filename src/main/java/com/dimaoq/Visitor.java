@@ -8,23 +8,19 @@ import com.github.javaparser.ast.expr.*;
 import com.github.javaparser.ast.stmt.ForStmt;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
-import com.github.javaparser.resolution.types.ResolvedType;
 import com.github.javaparser.symbolsolver.javaparsermodel.JavaParserFacade;
 import com.github.javaparser.symbolsolver.model.resolution.SymbolReference;
-import com.github.javaparser.symbolsolver.model.resolution.TypeSolver;
-import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
-import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
-import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
-import com.github.javaparser.utils.Pair;
 
-import java.io.File;
-import java.util.ArrayList;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Optional;
 
 public class Visitor {
-    private CombinedTypeSolver typeSolver;
+    private static void writeErr(CompilationUnit unit, Position pos, String s) {
+        System.err.println(String.format("%s, line %d: %s",
+                            unit.getStorage().get().getPath().toAbsolutePath().toString(), pos.line, s));
+    }
 
     private static class VisitExpr extends VoidVisitorAdapter<VisitorArg> {
         private void checkExpr(Expression e, VisitorArg arg) {
@@ -44,7 +40,7 @@ public class Visitor {
             }
 
             if (e.isFieldAccessExpr()) {
-                arg.set.add(e.asFieldAccessExpr().toString());
+                arg.set.add(e.asFieldAccessExpr().getNameAsString());
                 return;
             }
 
@@ -168,7 +164,7 @@ public class Visitor {
     }
 
     public static class DeclarationInfo {
-        String file;
+        Path file;
         Integer line;
         ResolvedMethodDeclaration decl;
     }
@@ -181,28 +177,40 @@ public class Visitor {
     }
 
     public static int getHashForDeclaration(ResolvedMethodDeclaration decl) {
-        String res = decl.getReturnType().describe();
-        res += decl.getQualifiedName();
-        res += Integer.toString(decl.getNumberOfParams());
+        StringBuilder sb = new StringBuilder();
+        sb.append(decl.getReturnType().describe());
+        sb.append(decl.getQualifiedName());
+        sb.append(decl.getNumberOfParams());
         for (int i = 0; i < decl.getNumberOfParams(); ++i) {
-            res += decl.getParam(i).describeType();
+            sb.append(decl.getParam(i).describeType());
         }
 
-        return res.hashCode();
+        return sb.toString().hashCode();
     }
 
     public static class UnusedMethodsFinder extends VoidVisitorAdapter<UnusedMethodsArg> {
         @Override
         public void visit(MethodDeclaration n, UnusedMethodsArg arg) {
             super.visit(n, arg);
-            ResolvedMethodDeclaration decl =  n.resolve();
-            DeclarationInfo info = new DeclarationInfo();
-            info.decl = decl;
-            info.line = n.getBegin().get().line;
-            info.file = arg.unit.getStorage().get().getFileName();
-            arg.declarations.put(getHashForDeclaration(decl), info);
-//            System.out.println(String.format("Ret type = %s, name = %s, argCount = %d",
-//                    decl.getReturnType().describe(), decl.getQualifiedName(), decl.getNumberOfParams()));
+            if (n.getAnnotationByName("Override").isPresent()) {
+                return;
+            }
+
+            try {
+                ResolvedMethodDeclaration decl =  n.resolve();
+                if (decl.getReturnType().isVoid() && n.getNameAsString().equals("main")) {
+                    return;
+                }
+
+                DeclarationInfo info = new DeclarationInfo();
+                info.decl = decl;
+                info.line = n.getBegin().get().line;
+                info.file = arg.unit.getStorage().get().getPath();
+                arg.declarations.put(getHashForDeclaration(decl), info);
+            } catch (Exception e) {
+//                writeErr(arg.unit, n.getBegin().get(),
+//                        String.format("failed while resolving method declaration %s: %s", n.getDeclarationAsString(), e.getLocalizedMessage()));
+            }
         }
 
         @Override
@@ -211,28 +219,17 @@ public class Visitor {
             try {
                 SymbolReference<ResolvedMethodDeclaration> fsolve = arg.facade.solve(n);
                 if (fsolve.isSolved()) {
-//                System.out.println(String.format("Call of method %s", fsolve.getCorrespondingDeclaration().getQualifiedName()));
                     ResolvedMethodDeclaration decl = fsolve.getCorrespondingDeclaration();
                     arg.usedCalls.put(getHashForDeclaration(decl), decl);
                 } else {
-                    System.err.println(String.format("Line %d: unresolved method usage: %s", n.getBegin().get().line, n.getNameAsString()));
+                    writeErr(arg.unit, n.getBegin().get(),
+                            String.format("unresolved method usage: %s", n.getNameAsString()));
                 }
             } catch (Exception e) {
-                System.err.println(String.format("Line %d: unsolved symbol while parsing %s", n.getBegin().get().line, n.getNameAsString()));
+//                writeErr(arg.unit, n.getBegin().get(),
+//                        String.format("failed while resolving method usage %s: %s", n.getNameAsString(), e.getLocalizedMessage()));
             }
 
         }
-    }
-
-    Visitor(ArrayList<String> sources) {
-        typeSolver = new CombinedTypeSolver();
-        typeSolver.add(new ReflectionTypeSolver());
-        for (String source : sources) {
-            typeSolver.add(new JavaParserTypeSolver(new File(source)));
-        }
-    }
-
-    public TypeSolver getTypeSolver() {
-        return typeSolver;
     }
 }
