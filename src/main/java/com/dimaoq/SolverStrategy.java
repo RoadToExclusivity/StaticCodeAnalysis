@@ -18,10 +18,6 @@ import java.util.List;
 import static java.nio.file.FileVisitResult.CONTINUE;
 import static java.nio.file.FileVisitResult.SKIP_SUBTREE;
 
-/**
- * Strategy which collects all SourceRoots and initialises the TypeSolver and returns the SourceRoots configured
- * with the TypeSolver in a ProjectRoot object.
- */
 public class SolverStrategy implements CollectionStrategy {
 
     private final ParserConfiguration parserConfiguration;
